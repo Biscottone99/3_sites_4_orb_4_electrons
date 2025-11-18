@@ -6,7 +6,16 @@ import plotting_module as plot
 import subprocess
 if __name__ == "__main__":
     #================Constants============================================
+    pauli_matrix = np.zeros((2, 2, 3), dtype=complex)
+    pauli_matrix[0, 1, 0] = 1.0
+    pauli_matrix[1, 0, 0] = 1.0
 
+    pauli_matrix[0, 1, 1] = -1j
+    pauli_matrix[1, 0, 1] = 1j
+
+    pauli_matrix[0, 0, 2] = 1.0
+    pauli_matrix[1, 1, 2] = -1.0
+    magnetic_field = 0.0
     check_flag = False
     #================Initialize our system===================================================
     input = mod.read_input("input.inp", "output.txt")
@@ -36,18 +45,16 @@ if __name__ == "__main__":
                 dipole_moment[i, i, k] += coords[sito, k] * (
                             input["nz"][sito] - (number_operator[i, i, j] + number_operator[i, i, j + 1]))
 
-    #================Generate Hamiltonian===================================================
-    hamiltonian = np.zeros((dimension,dimension), dtype = complex)
-    hamiltonian = mod.hubbard_diagonal(input["nsiti"], dimension, basis, input["esite"], input["u"])
-
+    #================Generate Hamiltonian============================================================#
+    hamiltonian = np.zeros((dimension,dimension), dtype = complex)                                   #
+    hamiltonian = mod.hubbard_diagonal(input["nsiti"], dimension, basis, input["esite"], input["u"]) #
+    #=================Hopping term===================================================================#
     hop_mat = np.zeros((input["nsiti"], input["nsiti"]), dtype = complex)
-    hop_mat[0,1] = -input["t"]
-    hop_mat[0,2] = -input["t"]
-    hop_mat[1,3] = -input["t"]
-    hop_mat[2,3] = -input["t"]
+    hop_mat[0,1] = +input["t"]
+    hop_mat[0,2] = +input["t"]
+    hop_mat[1,3] = +input["t"]
+    hop_mat[2,3] = +input["t"]
 
-    hop_mat[1,2] = -input["J"]
-    #hop_mat[0,3] = -input["J"]/2
     hop_mat = np.triu(hop_mat) + np.triu(hop_mat, 1).T
     hopping_nso = np.zeros((nso,nso))
     for i in range(nso):
@@ -58,11 +65,47 @@ if __name__ == "__main__":
                 hopping_nso[i, j] = 0.0
     hopping = mod.tb_to_rs(dimension, nso, basis, hopping_nso)
     hamiltonian += hopping
+    #====================V term ===================================================================#
+    V_term = mod.compute_V_term(number_operator, coords, input, dimension)                         #
+    hamiltonian += V_term                                                                          #
+    #=============================Magnetic Field===================================================#
+    for i in range(dimension):
+        hamiltonian[i,i] += -magnetic_field * np.sqrt(s2[i,i])
+    #===================Exchange terms=============================================================#
+    S1dotS2 = np.array([
+        [1 / 4, 0.0, 0.0, 0.0],
+        [0.0, -1 / 4, 1 / 2, 0.0],
+        [0.0, 1 / 2, -1 / 4, 0.0],
+        [0.0, 0.0, 0.0, 1 / 4]
+    ], dtype=float)
 
-    V_term = mod.compute_V_term(number_operator, coords, input, dimension)
+    # tensore totale
+    scambio_totale = np.zeros((nso, nso, nso, nso), dtype=float)
 
-    #hamiltonian += V_term
+    # siti dove copiare (base index)
+    blocchi = [2, 4]  # Seleziona gli orbitali tra cui c'è scambio
 
+    def pair_index(i, j):
+        return i * 2 + j  # mapping (αα, αβ, βα, ββ)
+
+
+    # copia il blocco per ogni sito
+    for base in blocchi:
+        for i in range(2):
+            for j in range(2):
+                p = pair_index(i, j)
+                for k in range(2):
+                    for d in range(2):
+                        q = pair_index(k, d)
+                        scambio_totale[base + i, base + j, base + k, base + d] = S1dotS2[p, q]
+
+    # scala con il tuo coupling J
+    scambio_totale *= input["J"]
+
+    exchange = mod.bielectron(basis,nso,scambio_totale)
+    hamiltonian += exchange
+
+    #==============================================================================================#
     with open('output.txt', 'a') as f:
         f.write('Hopping matrix between sites (eV):\n')
         for i in range(input["nsiti"]):
@@ -70,8 +113,6 @@ if __name__ == "__main__":
                 f.write(f'{np.real(hop_mat[i,j]):.6f} ')
             f.write('\n')
         f.write('\n')
-
-
     #========================Diagonalize Hamiltonian=========================================
     #Let's check if is hermitian
     if check_flag:
@@ -88,9 +129,6 @@ if __name__ == "__main__":
 
     eigenvalue, eigenvectors = eigh(hamiltonian)
     eigenvalue -= eigenvalue[0]
-    D = np.diag(eigenvalue)
-    res = eigenvectors.conj().T @ hamiltonian @ eigenvectors - D
-    print("Residuo max:", np.max(np.abs(res)))
     sz_rot = mod.rotate_matrix(sz,eigenvectors,1,dimension)
     s2_rot = mod.rotate_matrix(s2,eigenvectors,1,dimension)
     number_operator_rot = mod.rotate_matrix(number_operator,eigenvectors,nso,dimension)
@@ -98,9 +136,9 @@ if __name__ == "__main__":
     #========================Print some results=============================================
     with open('output.txt', 'a') as f:
         f.write('Eigenvalues (eV):\n')
-        for i, (energy, sz, s2) in enumerate(zip(eigenvalue,
-                                                 np.real(np.diag(sz_rot)),
-                                                 np.real(np.diag(s2_rot))), start=1):
+        for i, (energy, sz, s2) in enumerate(zip(eigenvalue[:20],
+                                                 np.real(np.diag(sz_rot[:20,:20])),
+                                                 np.real(np.diag(s2_rot[:20,:20]))), start=1):
             f.write(f'{i:3d}) Energy: {energy:.6f} eV, <Sz>: {sz:.6f}, <S2>: {s2:.6f}\n')
         f.write('\n')
 
@@ -109,6 +147,33 @@ if __name__ == "__main__":
         for i, row in enumerate(np.real(number_operator_rot[:20, :20, :]), start=1):
             row_str = " ".join(f"{x:.6f}" for x in row[i - 1, :])
             f.write(f"{i:3d}) State: {i - 1}, <n>: {row_str}\n")
+        f.write('\n')
+
+    # Calcolo delle cariche per ogni stato e per ogni sito
+    cariche = np.zeros((dimension, input["nsiti"]-1))
+
+    for i in range(dimension):
+        # Sito 0 → orbitali 0,1
+        cariche[i, 0] = input["nz"][0] - np.real((number_operator_rot[i, i, 0] +
+                                          number_operator_rot[i, i, 1]))
+
+        # Sito 1 → orbitali 2,3,4,5
+        cariche[i, 1] = (input["nz"][1]+input["nz"][2]) - np.real((number_operator_rot[i, i, 2] +
+                                          number_operator_rot[i, i, 3] +
+                                          number_operator_rot[i, i, 4] +
+                                          number_operator_rot[i, i, 5]))
+
+        # Sito 2 → orbitali 6,7
+        cariche[i, 2] = input["nz"][3] - np.real((number_operator_rot[i, i, 6] +
+                                          number_operator_rot[i, i, 7]))
+
+    # Scrittura del file
+    with open('output.txt', 'a') as f:
+        f.write('Charges:\n')
+        for idx_state in range(min(20, dimension)):
+            row = np.real(cariche[idx_state, :])
+            row_str = " ".join(f"{x:.6f}" for x in row)
+            f.write(f"{idx_state + 1:3d}) State {idx_state}: {row_str}\n")
         f.write('\n')
 
 #========================Dynamic part===========================================================
