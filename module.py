@@ -85,15 +85,12 @@ def generate_basis(electrons):
     configs = np.array([u[0] for u in usefull_sorted])
 
     return configs, nf
-
-
 def btest(n, i):
     return ((n >> i) & 1) == 1
 def ibset(n, i):
     return n | (1 << i)
 def ibclr(n, i):
     return n & ~(1 << i)
-
 def linear_search(arr, val):
     """
     Cerca un valore in una lista non ordinata.
@@ -136,63 +133,120 @@ def tb_to_rs(dim, nso, basis, op_tb):
     return op
 def read_input(filename="input.inp", outputfile="output.txt"):
     """
-    Legge i dati da un file di input (stile Fortran) e li scrive su un file di output.
-    Ritorna un dizionario con tutti i dati letti.
+    Formato atteso:
+
+      nsiti
+      length
+      t
+      (righe exchange: i j Jij)
+      deltat
+      points
+      (righe per-sito: U  epsilon  nz)
+
+    Le righe possono contenere commenti tipo: 4   #nsiti
     """
-    # Legge tutte le righe utili (ignorando righe vuote)
+
+    def clean(line):
+        """Rimuove eventuali commenti (#...) e spazi."""
+        return line.split('#')[0].strip()
+
+    # === Leggi file eliminando righe vuote/commentate ===
     with open(filename, "r") as f:
-        lines = [line.strip() for line in f if line.strip()]
+        raw = f.readlines()
 
-    # === Lettura variabili scalari ===
-    nsiti   = int(lines[0].split('#')[0].strip())
-    length  = float(lines[1].split('#')[0].strip())  # Å
-    t       = float(lines[2].split('#')[0].strip())  # eV
-    J       = float(lines[3].split('#')[0].strip())  # eV
-    deltat  = int(lines[4].split('#')[0].strip())
-    points  = int(lines[5].split('#')[0].strip())
+    lines = [clean(line) for line in raw if clean(line)]
 
-    # === Alloca array ===
+    # === Letture iniziali ===
+    nsiti  = int(lines[0])
+    length = float(lines[1])
+    t      = float(lines[2])
+
+    # === Lettura automatica righe exchange ===
+    exchange_lines = []
+    idx = 3   # dopo t iniziano le righe J
+
+    while idx < len(lines):
+        parts = lines[idx].split()
+
+        # Le righe exchange hanno esattamente 3 campi numerici
+        if len(parts) != 3:
+            break
+
+        # Verifica che siano numerici
+        try:
+            int(parts[0]); int(parts[1]); float(parts[2])
+        except:
+            break
+
+        exchange_lines.append(parts)
+        idx += 1
+
+    # === Crea matrice simmetrica J ===
+    Jmat = np.zeros((nsiti, nsiti))
+
+    for line in exchange_lines:
+        i, j, Jij = int(line[0]), int(line[1]), float(line[2])
+        Jmat[i, j] = Jij
+        Jmat[j, i] = Jij
+
+    # === Continua con i parametri scalari ===
+    deltat = int(lines[idx]); idx += 1
+    points = int(lines[idx]); idx += 1
+
+    # === Lettura per-sito ===
     u     = np.zeros(nsiti)
     esite = np.zeros(nsiti)
     nz    = np.zeros(nsiti, dtype=int)
 
-    # La tabella inizia dopo le 6 righe di parametri
-    first_site_line = 6
-
-    # === Lettura per-sito ===
-    for i in range(nsiti):
-        parts = lines[first_site_line + i].split()
-        u[i]     = float(parts[0])
-        esite[i] = float(parts[1])
-        nz[i]    = int(parts[2])
-
-    # === Scrittura su file di output ===
+    for s in range(nsiti):
+        parts = lines[idx + s].split()
+        u[s]     = float(parts[0])
+        esite[s] = float(parts[1])
+        nz[s]    = int(parts[2])
+    soc_flag = float(lines[14])
+    dynamic_flag = float(lines[15])
+    # === Scrivi output ===
     with open(outputfile, "w") as out:
         out.write(f"Numero siti: {nsiti}\n")
         out.write(f"Lunghezza (Å): {length}\n")
         out.write(f"t (eV): {t}\n")
-        out.write(f"J (eV): {J}\n")
-        out.write(f"Δt (fs): {deltat}\n")
+        out.write(f"Δt: {deltat}\n")
         out.write(f"Punti: {points}\n\n")
+        out.write("=== Matrice di exchange J_ij (eV) ===\n")
+
+        # stampa tabellata
+        for row in Jmat:
+            out.write("  ".join(f"{val:10.6f}" for val in row) + "\n")
+
+        out.write("\n")
 
         out.write("=== Parametri per ogni sito ===\n")
-        out.write("  i        u(i)        esite(i)      nz(i)\n")
+        out.write('__________________________________________|\n')
+        out.write("Idx |    U (eV)    |    ε (eV)    |   Z   |\n")
+        out.write('----!--------------|--------------|-------|\n')
+
         for i in range(nsiti):
-            out.write(f"{i + 1:3d}  {u[i]:10.5f}  {esite[i]:10.5f}  {nz[i]:3d}\n")
+            out.write(
+                f"{i + 1:3d} | "
+                f"{u[i]:7.3f}      | "
+                f"{esite[i]:7.3f}      | "
+                f"{nz[i]:3d}   |\n"
+            )
+        out.write('__________________________________________|\n')
 
-    print(f"\n✅ Input letto da '{filename}' e scritto in '{outputfile}'")
-
-    # === Ritorna i dati come dizionario ===
+    # === Ritorna dati ===
     return {
         "nsiti": nsiti,
         "length": length,
         "t": t,
-        "J": J,
         "deltat": deltat,
         "points": points,
         "u": u,
         "esite": esite,
-        "nz": nz
+        "nz": nz,
+        "Jmat": Jmat,
+        "soc_flag": soc_flag,
+        "dynamic_flag": dynamic_flag
     }
 def hubbard_diagonal(nsiti, dimension, basis, esite, u):
     """Generate the diagonal part of the Hubbard Hamiltonian.
@@ -220,41 +274,6 @@ def hubbard_diagonal(nsiti, dimension, basis, esite, u):
         for j in range(nsiti):
             if occupazioni[j] == 2:
                 H[i, i] += u[j]
-    return H
-def ppp_diagonal(dimension, coord, nsiti, esite, u, nz, basis):
-    """Generate the diagonal part of the PPP Hamiltonian.
-           Args:
-            dimension (int): Dimension of the basis.
-            coord (array): Coordinates of the sites.
-            nsiti (int): Number of sites.
-            esite (array): On-site energies.
-            u (array): Hubbard U values for each site.
-            nz (array): Number of electrons per site.
-            basis (array): Array of basis states in bit representation.
-
-        Returns:
-            H (array): Hamiltonian 2D array but with only diagonal elements filled.
-        """
-    H = np.zeros((dimension, dimension), dtype=complex)
-    for i in range(dimension):
-        occupazioni = np.zeros(nsiti)
-        for j in range(nsiti):
-            bool_bit_up = (basis[i] >> (2 * j)) & 1
-            occupazioni[j] += bool_bit_up
-            bool_bit_down = (basis[i] >> (2 * j + 1)) & 1
-            occupazioni[j] += bool_bit_down
-
-        # Inter-site Coulomb interactions
-        H[i, i] += occupazioni @ esite
-        for j in range(nsiti):
-            if occupazioni[j] == 2:
-                H[i, i] += u[j]
-        for j in range(nsiti - 1):
-            for k in range(j + 1, nsiti):
-                dist = np.linalg.norm(coord[j] - coord[k])
-                vij = 14.397 / dist  # eV·Å
-                ppp = (28.794 / (u[k] + u[j]) ** 2) * (nz[j] - occupazioni[j]) * (nz[k] - occupazioni[k])
-                H[i, i] += vij * ppp
     return H
 def hopping_matrix(nsiti, t, length, hop_flag, geom):
     """
@@ -687,3 +706,63 @@ def compute_V_term(number_operator, coords, input_data, dimension):
                     V_term[i, i] += 0.5 * (ppp + vjk)
 
     return V_term
+def spin(i):
+    return i % 2  # mapping spinorbitale → spin (0=↑,1=↓)
+def build_exchange_tensor(nso, Jmat, S0dotS1):
+    """
+    Costruisce il tensore di scambio tra siti nearest neighbor.
+
+    nso       : numero di spinorbitali (2 * nsiti)
+    Jmat      :Matrice dei coupling
+    S0dotS1   : matrice 2x2x2x2 dei prodotti di spin
+    nn_pairs  : lista di coppie di siti nearest-neighbor, es. [(0,1),(1,2),(2,3)]
+
+    Ritorna: scambio_totale (nso,nso,nso,nso)
+    """
+    # Trova gli indici (i, j) del triangolo superiore con valore J ≠ 0
+    nn_pairs = [(i, j) for i, j in zip(*np.triu_indices(nso//2, k=1)) if Jmat[i, j] != 0]
+    scambio_totale = np.zeros((nso, nso, nso, nso), dtype=float)
+
+    for (a, b) in nn_pairs:  # loop sui siti nearest-neighbor
+        for i in range(2 * a, 2 * a + 2):  # spinorbitali del sito a
+            si = spin(i)
+            for j in range(2 * b, 2 * b + 2):  # spinorbitali del sito b
+                sj = spin(j)
+                for k in range(2 * a, 2 * a + 2):  # "annihilation" sul sito a
+                    sk = spin(k)
+                    for d in range(2 * b, 2 * b + 2):  # "annihilation" sul sito b
+                        sd = spin(d)
+
+                        # contributo di scambio
+                        scambio_totale[i, j, k, d] += Jmat[a,b]* S0dotS1[si, sj, sk, sd]
+
+                # simmetria a <-> b per garantire hermiticità
+                for k in range(2 * b, 2 * b + 2):
+                    sk = spin(k)
+                    for d in range(2 * a, 2 * a + 2):
+                        sd = spin(d)
+                        scambio_totale[i, j, k, d] += Jmat[a,b] * S0dotS1[si, sj, sk, sd]
+
+    return scambio_totale
+def extract_multiplet_energies(sz_rot, s2_rot, eigenvalue):
+    """Ritorna le energie del 2° singoletto Sz=0, 2° tripletto Sz=0, 1° quintetto Sz=0."""
+
+    diag_sz = np.diagonal(sz_rot)
+    diag_s2 = np.diagonal(s2_rot)
+
+    # maschere
+    sing_mask  = np.isclose(diag_sz, 0.0) & np.isclose(diag_s2, 0.0)
+    trip_mask  = np.isclose(diag_sz, 0.0) & np.isclose(diag_s2, 2.0)
+    quint_mask = np.isclose(diag_sz, 0.0) & np.isclose(diag_s2, 6.0)
+
+    # indici
+    idx_sing  = np.where(sing_mask)[0]
+    idx_trip  = np.where(trip_mask)[0]
+    idx_quint = np.where(quint_mask)[0]
+
+    # energie (None se non esistono abbastanza stati)
+    E_sing  = eigenvalue[idx_sing[1]]  if len(idx_sing)  > 1 else None  # 2° singoletto
+    E_trip  = eigenvalue[idx_trip[1]]  if len(idx_trip)  > 1 else None  # 2° tripletto
+    E_quint = eigenvalue[idx_quint[0]] if len(idx_quint) > 0 else None  # 1° quintetto
+
+    return E_sing, E_trip, E_quint
