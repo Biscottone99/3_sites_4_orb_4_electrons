@@ -17,6 +17,7 @@ if __name__ == "__main__":
     pauli_matrix[1, 1, 2] = -1.0
     magnetic_field = 0.0
     check_flag = False
+
     #================Initialize our system===================================================
     input = mod.read_input("input.inp", "output.txt")
     basis, dimension = mod.generate_basis(input["nsiti"])
@@ -25,9 +26,20 @@ if __name__ == "__main__":
     coords[3,0] = input["length"]
     with open('output.txt', 'a') as f:
         f.write("\n")
-        f.write('\nAtomic Coordinates:\n')
+        f.write('Atomic Coordinates\n')
+        f.write("----------------------------------------------------|\n")
+        f.write("Idx |       x       |       y       |       z       |\n")
+        f.write("----------------------------------------------------|\n")
+
         for i in range(input["nsiti"]):
-            f.write(f'Atom {i + 1}: x={coords[i, 0]:.6f} y={coords[i, 1]:.6f} z={coords[i, 2]:.6f}\n')
+            f.write(
+                f"{i + 1:3d} | "
+                f"{coords[i, 0]:12.6f}  | "
+                f"{coords[i, 1]:12.6f}  | "
+                f"{coords[i, 2]:12.6f}  |\n"
+            )
+        f.write("----------------------------------------------------|\n")
+
         f.write("\n")
     nso = 2 * input["nsiti"]
     # =========================Generate some usefull operators================================
@@ -50,9 +62,9 @@ if __name__ == "__main__":
     hamiltonian = mod.hubbard_diagonal(input["nsiti"], dimension, basis, input["esite"], input["u"]) #
     #=================Hopping term===================================================================#
     hop_mat = np.zeros((input["nsiti"], input["nsiti"]), dtype = complex)
-    hop_mat[0,1] = +input["t"]
+    #hop_mat[0,1] = +input["t"]
     hop_mat[0,2] = +input["t"]
-    hop_mat[1,3] = +input["t"]
+    #hop_mat[1,3] = +input["t"]
     hop_mat[2,3] = +input["t"]
 
     hop_mat = np.triu(hop_mat) + np.triu(hop_mat, 1).T
@@ -64,46 +76,43 @@ if __name__ == "__main__":
             else:
                 hopping_nso[i, j] = 0.0
     hopping = mod.tb_to_rs(dimension, nso, basis, hopping_nso)
-    hamiltonian += hopping
+    hamiltonian -= hopping
     #====================V term ===================================================================#
-    V_term = mod.compute_V_term(number_operator, coords, input, dimension)                         #
-    hamiltonian += V_term                                                                          #
+    # V_term = mod.compute_V_term(number_operator, coords, input, dimension)                         #
+    #hamiltonian += V_term                                                                          #
     #=============================Magnetic Field===================================================#
     for i in range(dimension):
         hamiltonian[i,i] += -magnetic_field * np.sqrt(s2[i,i])
     #===================Exchange terms=============================================================#
-    S1dotS2 = np.array([
-        [1 / 4, 0.0, 0.0, 0.0],
-        [0.0, -1 / 4, 1 / 2, 0.0],
-        [0.0, 1 / 2, -1 / 4, 0.0],
-        [0.0, 0.0, 0.0, 1 / 4]
-    ], dtype=float)
-
-    # tensore totale
-    scambio_totale = np.zeros((nso, nso, nso, nso), dtype=float)
-
-    # siti dove copiare (base index)
-    blocchi = [2, 4]  # Seleziona gli orbitali tra cui c'è scambio
-
-    def pair_index(i, j):
-        return i * 2 + j  # mapping (αα, αβ, βα, ββ)
-
-
-    # copia il blocco per ogni sito
-    for base in blocchi:
-        for i in range(2):
-            for j in range(2):
-                p = pair_index(i, j)
-                for k in range(2):
-                    for d in range(2):
-                        q = pair_index(k, d)
-                        scambio_totale[base + i, base + j, base + k, base + d] = S1dotS2[p, q]
-
-    # scala con il tuo coupling J
-    scambio_totale *= input["J"]
+    S0dotS1 = np.zeros((2,2,2,2), dtype = float)
+    S0dotS1[0,0,0,0] = 0.25
+    S0dotS1[0,1,0,1] = -0.25
+    S0dotS1[1,0,1,0] = -0.25
+    S0dotS1[1,1,1,1] = 0.25
+    S0dotS1[0,1,1,0] = 0.50
+    S0dotS1[1,0,0,1] = 0.50
+    scambio_totale = mod.build_exchange_tensor(nso, input["Jmat"], S0dotS1)
 
     exchange = mod.bielectron(basis,nso,scambio_totale)
     hamiltonian += exchange
+    # ===============================SOC==============================================================#
+    if input["soc_flag"] == 1:
+        soc_so = np.zeros((nso, nso), dtype=complex)
+        for i in range(0, nso - 2, 2):
+            if i != 2:
+                soc_so[i, i + 3] = -input["t"] * 1j * 3.94e-4
+                soc_so[i + 1, i + 2] = -input["t"] * 1j * 3.94e-4
+        soc_so = np.triu(soc_so) + np.conj(np.triu(soc_so, 1).T)
+        if check_flag:
+            plot.plot_heatmap_cplx(soc_so, 'SOC')
+        soc_mono = mod.tb_to_rs(dimension, nso, basis, soc_so)
+        hamiltonian += soc_mono*1
+     #===========================Check=============================================================
+    with open('check.txt', 'w') as w:
+        for i in range(dimension-1):
+            for j in range(i+1,dimension):
+                if np.abs(np.real(hamiltonian[i,j]))>1e-8:
+                    w.write(f'{i} {j} {np.real(hamiltonian[i,j]):.6f}\n')
 
     #==============================================================================================#
     with open('output.txt', 'a') as f:
@@ -135,18 +144,38 @@ if __name__ == "__main__":
     rotated_dipole = mod.rotate_matrix(dipole_moment,eigenvectors,3,dimension)
     #========================Print some results=============================================
     with open('output.txt', 'a') as f:
-        f.write('Eigenvalues (eV):\n')
+        header = ( "Idx|   Energy (eV)      <Sz>        <S2>\n")
+        f.write(header)
+        f.write('-------------------------------------------\n')
         for i, (energy, sz, s2) in enumerate(zip(eigenvalue[:20],
                                                  np.real(np.diag(sz_rot[:20,:20])),
                                                  np.real(np.diag(s2_rot[:20,:20]))), start=1):
-            f.write(f'{i:3d}) Energy: {energy:.6f} eV, <Sz>: {sz:.6f}, <S2>: {s2:.6f}\n')
+            f.write(f'{i:3d}) {energy:12.6f} {sz:12.6f} {s2:12.6f}\n')
         f.write('\n')
 
     with open('output.txt', 'a') as f:
         f.write('Number operator:\n')
-        for i, row in enumerate(np.real(number_operator_rot[:20, :20, :]), start=1):
-            row_str = " ".join(f"{x:.6f}" for x in row[i - 1, :])
-            f.write(f"{i:3d}) State: {i - 1}, <n>: {row_str}\n")
+
+        # Header
+        header = (
+            "Idx |"
+            "    α SOMO      β SOMO  |"
+            "    α HOMO      β HOMO  |"
+            "    α LUM0      β LUMO  |"
+            "    α SOMO      β SOMO  |\n"
+        )
+        f.write(header)
+        f.write('_________________________________________________________________________________________________________\n')
+        # Righe
+        for i in range(min(20, number_operator_rot.shape[0])):
+            vals = np.real(number_operator_rot[i, i, :])  # 8 valori αβαβαβαβ
+            # Formattazione 4 blocchi da 2 numeri
+            blocks = []
+            for b in range(0, 8, 2):
+                blocks.append(f"{vals[b]:10.6f}  {vals[b + 1]:10.6f}")
+            line = f"{i + 1:3d} | " + " | ".join(blocks) + " |\n"
+            f.write(line)
+
         f.write('\n')
 
     # Calcolo delle cariche per ogni stato e per ogni sito
@@ -169,47 +198,105 @@ if __name__ == "__main__":
 
     # Scrittura del file
     with open('output.txt', 'a') as f:
-        f.write('Charges:\n')
+        f.write('Charges\n')
+
+        # Header
+        header = (
+            "Idx |"
+            "      SOMO    |"
+            "     BRIDGE   |"
+            "      SOMO    |\n"
+        )
+        f.write(header)
+        f.write('__________________________________________________\n')
+        # Righe
         for idx_state in range(min(20, dimension)):
-            row = np.real(cariche[idx_state, :])
-            row_str = " ".join(f"{x:.6f}" for x in row)
-            f.write(f"{idx_state + 1:3d}) State {idx_state}: {row_str}\n")
+            vals = np.real(cariche[idx_state, :])  # array di 4 valori
+            # blocchi ben allineati
+            blocks = []
+            for v in vals:
+                blocks.append(f"{v:12.6f}")
+            line = f"{idx_state + 1:3d} | " + " | ".join(blocks) + " |\n"
+            f.write(line)
+
+        f.write('\n')
+
+    with open('output.txt', 'a') as f:
+        f.write('Transition dipole moments\n')
+        f.write('Idx   <Sz>        <S2>    Dipole(S0→State)\n')
+        f.write('-------------------------------------------\n')
+
+        for idx_state in range(min(20, dimension)):
+            sz_val = np.real(sz_rot[idx_state, idx_state])
+            s2_val = np.real(s2_rot[idx_state, idx_state])
+            dip_val = (np.real(rotated_dipole[0, idx_state,0]))
+
+            f.write(f"{idx_state + 1:3d})  {sz_val:7.3f}   {s2_val:7.3f}   {dip_val:12.6f}\n")
+
         f.write('\n')
 
 #========================Dynamic part===========================================================
-sys.exit()
-psi0 = rotated_dipole[0,:,0] #prima riga del vettore dipolo di transizione lungo z
-psi0 /= np.linalg.norm(psi0)
-density_matrix = np.outer(np.conj(psi0), psi0)
-density_matrix.tofile('rho.bin')
-spindensity = 0.5 * ( (number_operator_rot[:,:,nso-2] - number_operator_rot[:,:,nso-1]) - (number_operator_rot[:,:,0] - number_operator_rot[:,:,1]) )
-spindensity.tofile('spindensity.bin')
-eigenvalue.tofile('eigenvalues.bin')
+if input["dynamic_flag"] == 2:
+    sys.exit()
+if input["dynamic_flag"] == 0:
+    psi0 = rotated_dipole[0,:,0] #prima riga del vettore dipolo di transizione lungo x
+    psi0 /= np.linalg.norm(psi0)
+    density_matrix = np.outer(np.conj(psi0), psi0)
+    density_matrix.tofile('rho.bin')
+    spindensity = 0.5 * ( (number_operator_rot[:,:,nso-2] - number_operator_rot[:,:,nso-1]) - (number_operator_rot[:,:,0] - number_operator_rot[:,:,1]) )
+    spindensity.tofile('spindensity.bin')
+    eigenvalue.tofile('eigenvalues.bin')
 
 
-rho_file = "rho.bin"
-eigen_file = "eigenvalues.bin"
-props_files = ["spindensity.bin"]  # lista dei file dei tensori di proprietà
-n_prop = len(props_files)
+    rho_file = "rho.bin"
+    eigen_file = "eigenvalues.bin"
+    props_files = ["spindensity.bin"]  # lista dei file dei tensori di proprietà
+    n_prop = len(props_files)
 
-subprocess.run(['ifx', 'Unitaria.f90', '-o', 'unitary.e', '-qmkl', '-qopenmp'], check=True)
+    subprocess.run(['ifx', 'Unitaria.f90', '-o', 'unitary.e', '-qmkl', '-qopenmp'], check=True)
 
-program_input = "\n".join([
-    str(dimension),
-    rho_file,
-    eigen_file,
-    str(n_prop),
-] + props_files + [
-    str(input["deltat"]),
-    str(input["points"])
-]) + "\n"
+    program_input = "\n".join([
+        str(dimension),
+        rho_file,
+        eigen_file,
+        str(n_prop),
+    ] + props_files + [
+        str(input["deltat"]),
+        str(input["points"])
+    ]) + "\n"
 
-subprocess.run(['./unitary.e'], input=program_input, text=True, check=True)
-subprocess.run(['mv', 'prop1.dat', 'spinpol_evolution.dat'], check=True)
+    subprocess.run(['./unitary.e'], input=program_input, text=True, check=True)
+    subprocess.run(['mv', 'prop1.dat', 'spinpol_evolution.dat'], check=True)
+if ["dynamic_flag"] == 1:
+    if input["dynamic_flag"] == 1:
+        treshold = 0.02
+    for i in range(dimension):
+        if np.real(rotated_dipole[0,i,0])>treshold:
+            dimension_reduced = i
+    psi0 = rotated_dipole[0,:dimension_reduced,0]
+    psi0 = psi0/np.linalg.norm(psi0)
+    hopping_rotated = mod.rotate_matrix(-hopping,eigenvectors,1,dimension)
+    spindensity = 0.5 * ( (number_operator_rot[:,:,nso-2] - number_operator_rot[:,:,nso-1]) - (number_operator_rot[:,:,0] - number_operator_rot[:,:,1]) )
+    with open('input-red/system_input.dat', 'w') as f:
+        f.write(f"{dimension_reduced}\n")
+        f.write(f"{input["nsiti"]}\n")
+    eigenvalue[:dimension_reduced].tofile('input-red/eigenvalues.bin')
+    psi0.tofile('input-red/psi0.bin')
+    spindensity[:dimension_reduced,:dimension_reduced].tofile('input-red/spindensity.bin')
+    hopping_rotated[:dimension_reduced,:dimension_reduced].tofile('input-red/op1.bin')
+    subprocess.run(['ifx', 'red.f90', '-o', 'red.e', '-qmkl', '-qopenmp'], check=True)
+    subprocess.run(['./red.e'])
 #========================End of unitary evolution===========================================
 # Now we can plot some results from the unitary evolution
-data = np.loadtxt('spinpol_evolution.dat', usecols=(0, 1))
-
-time = data[:, 0] * 1e-3     # converto in ns
-spinpol = data[:, 1]  * 50  # convert in percentual
-plot.plot_curve(time, spinpol, 'Spin Polarization Evolution', 'Time (ns)', 'Spin Polarization (%)')
+if input["dynamic_flag"] == 0:
+    data = np.loadtxt('spinpol_evolution.dat', usecols=(0, 1))
+    time = data[:, 0] * 1e-3     # converto in ns
+    spinpol = data[:, 1] * 100
+    plot.plot_curve(time, spinpol, 'Spin Polarization Evolution', 'Time (ns)', 'Spin Polarization (%)')
+if input["dynamic_flag"] == 1:
+    data = np.loadtxt('dynamic-results/properties.dat')
+    time = data[:, 0]
+    energy = data[:,1]
+    spinpol = data[:, 2] * 100  # convert in percentual
+    plot.plot_curve(time, energy, 'Energy Evolution', 'Time (ns)', 'Energy (eV)')
+    plot.plot_curve(time, spinpol, 'Spin Polarization Evolution', 'Time (ns)', 'Spin Polarization (%)')
