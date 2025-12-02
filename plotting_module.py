@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from scipy.interpolate import griddata
+from matplotlib.colors import ListedColormap, BoundaryNorm
 def plot_heatmap_real(matrice, name):
     plt.imshow(matrice, cmap='viridis', origin='upper')
     plt.colorbar(label='Valore')
@@ -100,4 +102,161 @@ def plot_curve(x, y, name, xlabel, ylabel):
     plt.grid(True)
     plt.tight_layout()
     plt.xlim(np.min(x), np.max(x))
+    plt.show()
+
+def heatmaps_multiple(data_list, titles=None, labels=None, cmap='viridis', grid_res=100, ncols=2):
+    """
+    Plotta multiple heatmap da liste di vettori x, y, z.
+
+    Parameters
+    ----------
+    data_list : list of tuples
+        Lista di (x, y, z) da plottare.
+    titles : list of str
+        Titoli dei subplot.
+    labels : list of tuples
+        Lista di (xlabel, ylabel) per ogni subplot.
+    cmap : str
+        Colormap.
+    grid_res : int
+        Risoluzione griglia di interpolazione.
+    ncols : int
+        Numero di colonne dei subplot.
+    """
+    n = len(data_list)
+    nrows = int(np.ceil(n / ncols))
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows))
+    axes = np.array(axes).reshape(-1)  # semplifica l'indicizzazione
+
+    for i, (x, y, z) in enumerate(data_list):
+        ax = axes[i]
+        xi = np.linspace(np.min(x), np.max(x), grid_res)
+        yi = np.linspace(np.min(y), np.max(y), grid_res)
+        X, Y = np.meshgrid(xi, yi)
+        Z = griddata((x, y), z, (X, Y), method='cubic')
+
+        pcm = ax.pcolormesh(X, Y, Z, shading='auto', cmap=cmap)
+        #ax.scatter(x, y, c=z, edgecolor='k', cmap=cmap, s=30)
+        fig.colorbar(pcm, ax=ax, label='Energy (eV)')
+
+        if titles: ax.set_title(titles[i])
+        if labels: ax.set_xlabel(labels[i][0]); ax.set_ylabel(labels[i][1])
+        ax.grid(True, alpha=0.3)
+
+        # y_mid = 0.5 * (np.min(y) + np.max(y))
+        # ax.plot([np.min(x), np.max(x)],
+        #         [y_mid, y_mid],
+        #         '--', color='white', linewidth=1.5)
+        # x_mid = 0.5 * (np.min(x) + np.max(x))
+        # ax.plot([x_mid, x_mid],
+        #         [np.min(y), np.max(y)],
+        #         '--', color='white', linewidth=1.5)
+    # Rimuove eventuali subplot vuoti
+    for j in range(n, len(axes)):
+        fig.delaxes(axes[j])
+
+    plt.tight_layout()
+    plt.show()
+
+def heatmaps_multiple_masked(data_list, threshold, titles=None, labels=None,
+                      cmap='viridis', grid_res=100, ncols=2):
+    """
+    Plotta multiple heatmap da liste di vettori x, y, z.
+    La prima heatmap filtra i punti con |z| < threshold.
+    Le mappe successive usano solo quei punti filtrati.
+
+    Parameters
+    ----------
+    data_list : list of tuples
+        Lista di (x, y, z) da plottare.
+    threshold : float
+        Valore soglia su |z| per filtrare i punti della prima mappa.
+    titles : list of str
+        Titoli dei subplot.
+    labels : list of tuples
+        Lista di (xlabel, ylabel) per ogni subplot.
+    cmap : str
+        Colormap.
+    grid_res : int
+        Risoluzione della griglia per l'interpolazione.
+    ncols : int
+        Numero di colonne dei subplot.
+    """
+    # ===== FILTRO SULLA PRIMA HEATMAP =====
+    x0, y0, z0 = data_list[0]
+
+    mask = np.abs(z0) < threshold
+    xf, yf, zf = x0[mask], y0[mask], z0[mask]
+
+    print(f"[INFO] Punti che soddisfano |z| < {threshold}: {np.sum(mask)} / {len(z0)}")
+
+    # Rimpiazza la prima tripletta nella lista dei dati
+    data_list_filtered = [(xf, yf, zf)] + data_list[1:]
+
+    # ===== PLOT =====
+    n = len(data_list_filtered)
+    nrows = int(np.ceil(n / ncols))
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows))
+    axes = np.array(axes).reshape(-1)
+
+    for i, (x, y, z) in enumerate(data_list_filtered):
+        ax = axes[i]
+
+        xi = np.linspace(np.min(x), np.max(x), grid_res)
+        yi = np.linspace(np.min(y), np.max(y), grid_res)
+        X, Y = np.meshgrid(xi, yi)
+        Z = griddata((x, y), z, (X, Y), method='cubic')
+
+        pcm = ax.pcolormesh(X, Y, Z, shading='auto', cmap=cmap)
+        fig.colorbar(pcm, ax=ax, label='Z')
+
+        if titles:
+            ax.set_title(titles[i])
+        if labels:
+            ax.set_xlabel(labels[i][0])
+            ax.set_ylabel(labels[i][1])
+
+        ax.grid(True, alpha=0.3)
+
+    # Rimuovi subplot extra
+    for j in range(n, len(axes)):
+        fig.delaxes(axes[j])
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_three_heatmaps_from_points(x, y, z1, z2, z3,
+                                    titles=("Map 1", "Map 2", "Map 3"),
+                                    grid_res=100):
+    # --- griglia regolare ---
+    xi = np.linspace(np.min(x), np.max(x), grid_res)
+    yi = np.linspace(np.min(y), np.max(y), grid_res)
+    X, Y = np.meshgrid(xi, yi)
+
+    # --- interpolazione ---
+    Z1 = griddata((x, y), z1, (X, Y), method='nearest')
+    Z2 = griddata((x, y), z2, (X, Y), method='nearest')
+    Z3 = griddata((x, y), z3, (X, Y), method='nearest')
+
+    maps = [Z1, Z2, Z3]
+
+    # --- colormap discreta per valori 1,2,3 ---
+    cmap = ListedColormap(["blue", "green", "red"])
+    bounds = [0.5, 1.5, 2.5, 3.5]
+    norm = BoundaryNorm(bounds, cmap.N)
+
+    # --- plot ---
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    for ax, Z, title in zip(axes, maps, titles):
+        im = ax.pcolormesh(X, Y, Z, cmap=cmap, norm=norm, shading='auto')
+        ax.set_title(title)
+        ax.set_xlabel(r"$J_{H-L}$")
+        ax.set_ylabel("$J_{S-L}$")
+
+    #fig.colorbar(im, ax=axes.tolist(), ticks=[1,2,3], label="Rank")
+    plt.tight_layout()
     plt.show()
