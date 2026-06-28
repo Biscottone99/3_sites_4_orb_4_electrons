@@ -3,8 +3,23 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.interpolate import griddata
 from matplotlib.colors import ListedColormap, BoundaryNorm
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import numpy as np
+
+
 def plot_heatmap_real(matrice, name):
-    plt.imshow(matrice, cmap='viridis', origin='upper')
+    # 1. Crea una maschera per isolare gli zeri.
+    # Usiamo una piccola tolleranza (1e-10) per evitare problemi con gli zeri "floating point"
+    matrice_mascherata = np.ma.masked_where(np.abs(matrice) < 1e-10, matrice)
+
+    # 2. Copia la colormap viridis e fissa il colore dei valori scartati/mascherati al bianco
+    cmap_personalizzata = plt.cm.viridis.copy()
+    cmap_personalizzata.set_bad(color='white')
+
+    # 3. Plotta la matrice mascherata con la nuova colormap
+    plt.imshow(matrice_mascherata, cmap=cmap_personalizzata, origin='upper')
+
     plt.colorbar(label='Valore')
     plt.title(name)
     plt.xlim(-0.5, matrice.shape[1] - 0.5)
@@ -260,3 +275,59 @@ def plot_three_heatmaps_from_points(x, y, z1, z2, z3,
     #fig.colorbar(im, ax=axes.tolist(), ticks=[1,2,3], label="Rank")
     plt.tight_layout()
     plt.show()
+
+
+
+
+
+def plot_discrete_ranking_grid(x, y, z_list, titles, labels):
+    """
+    Forza una griglia a quadratini netti (pixel art) per i ranking interi (1, 2, 3, 4).
+    Nessuna interpolazione, nessuna sfumatura.
+    """
+    # 1. Trova le coordinate uniche per capire la dimensione della griglia
+    x_unq = np.unique(x)
+    y_unq = np.unique(y)
+    nx = len(x_unq)
+    ny = len(y_unq)
+
+    # Ordiniamo gli assi per sicurezza
+    x_unq = np.sort(x_unq)
+    y_unq = np.sort(y_unq)
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    axes = axes.flatten()
+
+    # 2. Palette rigida: Blu, Azzurro, Arancione, Rosso
+    cmap = mcolors.ListedColormap(['#1f77b4', '#4dbeee', '#ff7f0e', '#d62728'])
+    # I bounds costringono i valori: tutto ciò tra 0.5 e 1.5 diventa Blu scuro (1), ecc.
+    bounds = [0.5, 1.5, 2.5, 3.5, 4.5]
+    norm = mcolors.BoundaryNorm(bounds, cmap.N)
+
+    for i, (ax, z, title, label) in enumerate(zip(axes, z_list, titles, labels)):
+        # Creiamo una matrice vuota
+        Z = np.zeros((ny, nx))
+
+        # 3. Mappiamo i dati 1D sulla griglia 2D (a prova di errore di ordinamento)
+        for xi, yi, zi in zip(x, y, z):
+            idx_x = np.where(x_unq == xi)[0][0]
+            idx_y = np.where(y_unq == yi)[0][0]
+            Z[idx_y, idx_x] = zi
+
+        extent = [x_unq.min(), x_unq.max(), y_unq.min(), y_unq.max()]
+
+        # 4. IL SEGRETO: interpolation='none' spegne le sfumature
+        im = ax.imshow(Z, origin='lower', extent=extent, cmap=cmap, norm=norm,
+                       interpolation='none', aspect='auto')
+
+        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_xlabel(label[0], fontsize=12)
+        ax.set_ylabel(label[1], fontsize=12)
+
+        # 5. Colorbar personalizzata senza label "Energy"
+        cbar = fig.colorbar(im, ax=ax, ticks=[1, 2, 3, 4])
+        cbar.ax.set_yticklabels(['1° (GS)', '2°', '3°', '4° (Max)'])
+
+    plt.tight_layout()
+    plt.show()
+
