@@ -1,5 +1,7 @@
 import numpy as np
 import plotting_module as plot
+import module as mod
+from scipy.linalg import block_diag
 import math
 def costruisci_hamiltoniana_gerade(e_H, e_L, U_H, U_L, U_S, J_HL, J_SL, t):
     """
@@ -205,94 +207,67 @@ if __name__ == "__main__":
         "U_H": 8.0,
         "U_L": 6.0,
         "U_S": 10.0,
-        "J_HL": -1.0,
-        "J_SL": -1.0,
+        "J_HL": 1.0,
+        "J_SL": 1.0,
         "t": 1.0
     }
 
-    # =======================SINGOLETTI GERADE============================================
-    H_matrix = costruisci_hamiltoniana_gerade(**parametri)
-    singlet_gerade, trash = ordina_matrice_per_diagonale(H_matrix)
-    # plot.plot_heatmap_real( singlet_gerade, "Reordered Matrix")
-    # Stampa un paio di elementi per verifica
-    print("Matrice Hamiltoniana creata con successo!")
+
+    # =============================================================================================
+    # ==========================INIZIO GERADE DI SINGOLETTO======================================
+    H_matrix_G = costruisci_hamiltoniana_gerade(**parametri)
+    singlet_gerade, trash = ordina_matrice_per_diagonale(H_matrixG)
+
+    print("\nMatrice Hamiltoniana Singoletto gerade creata con successo!")
     print("Shape della matrice:", singlet_gerade.shape)
-    print(f"Elemento H[0,0] (D1): {singlet_gerade[0, 0]}")
-    print(f"Elemento H[0,3] (-sqrt(2)*t): {singlet_gerade[0, 3]:.3f}")
+    print(f"Elemento H[0,0] (F1): {singlet_gerade[0, 0]:.4f}")
+    # Nota: L'elemento 0,3 nell'ungerade è sqrt(3)*t o 0 a seconda dell'ordinamento
     print(f"Diagonale: {np.diag(singlet_gerade)}")
     print(f"Indici ordinati: {trash}")
 
     # =============COUPLING G1-G4================================================================
-    print(f"=================G1-G4==================")
+    # 1. Definizioni indici
     idx1 = np.where(trash == 0)[0][0]
     idx2 = np.where(trash == 3)[0][0]
-    # 1. Costruzione e diagonalizzazione del blocco 2x2 (Indici 0 e 2)
-    mini_H_g1g4 = np.array([
+    idx3 = np.where(trash == 4)[0][0]
+    idx4 = np.where(trash == 10)[0][0]
+
+    # 2. Costruzione e diagonalizzazione del blocco 2x2
+    mini_H_u1u4 = np.array([
         [singlet_gerade[idx1, idx1], singlet_gerade[idx1, idx2]],
         [singlet_gerade[idx2, idx1], singlet_gerade[idx2, idx2]]
     ])
 
-    w_g1g4, vec_g1g4 = np.linalg.eigh(mini_H_g1g4)
-    E_psi_minus_g1g4 = w_g1g4[0]
-    E_psi_plus_g1g4 = w_g1g4[1]
+    w, vec = np.linalg.eigh(mini_H_u1u4)
 
-    # Calcolo dell'angolo (mantenuto per puro log/stampa)
-    deltae_g1g4 = singlet_gerade[idx1, idx1] - singlet_gerade[idx2, idx2]
-    argomento_g1g4 = (2 * singlet_gerade[idx1, idx2]) / deltae_g1g4 if deltae_g1g4 != 0 else 0
-    angolo_def_g1g4 = math.degrees(np.arctan(argomento_g1g4) / 2)
+    # 3. Energie di base degli stati perturbanti
+    E_idx3 = singlet_gerade[idx3, idx3]
+    E_idx4 = singlet_gerade[idx4, idx4]
 
-    print(f"angolo G1-G4 (gradi): {angolo_def_g1g4:.2f}")
-    print(f"E_psi_minus esatta: {E_psi_minus_g1g4:.4f}")
-    print(f"E_psi_plus esatta: {E_psi_plus_g1g4:.4f}")
-    # (Non hai applicato PT2 qui nel tuo script originale)
-    GS_singoletto = E_psi_minus_g1g4
-    # =============================================================================================
+    # 4. Accoppiamenti "nudi" (Solo idx2 si accoppia. idx1 ha coupling 0)
+    V_2_idx3 = singlet_gerade[idx2, idx3]
+    V_2_idx4 = singlet_gerade[idx2, idx4]
 
-    # =============COUPLING G2-G3================================================================
-    print(f"=================G2-G3==================")
-    idx1 = np.where(trash == 1)[0][0]
-    idx2 = np.where(trash == 2)[0][0]
-    # 1. Costruzione e diagonalizzazione del blocco 2x2 (Indici 1 e 3)
-    mini_H_g2g3 = np.array([
-        [singlet_gerade[idx1, idx1], singlet_gerade[idx1, idx2]],
-        [singlet_gerade[idx2, idx1], singlet_gerade[idx2, idx2]]
-    ])
+    # ================== CORREZIONE STATO MINUS (w[0]) ==================
+    # Autovettore: vec[:, 0].
+    # Il coefficiente di idx1 è vec[0,0], il coefficiente di idx2 è vec[1,0].
+    # Poiché idx1 non si accoppia, il coupling efficace dipende solo da vec[1,0].
 
-    w_g2g3, vec_g2g3 = np.linalg.eigh(mini_H_g2g3)
-    E_psi_minus_g2g3 = w_g2g3[0]
-    E_psi_plus_g2g3 = w_g2g3[1]
+    coupling_minus_3 = vec[1, 0] * V_2_idx3
+    coupling_minus_4 = vec[1, 0] * V_2_idx4
 
-    deltae_g2g3 = singlet_gerade[idx1, idx1] - singlet_gerade[idx2, idx2]
-    argomento_g2g3 = (2 * singlet_gerade[idx1, idx2]) / deltae_g2g3 if deltae_g2g3 != 0 else 0
-    angolo_def_g2g3 = math.degrees(np.arctan(argomento_g2g3) / 2)
+    # Sommiamo le due correzioni perturbative indipendenti
+    E_s_gerade_minus = w[0] + (coupling_minus_3 ** 2) / (w[0] - E_idx3) + (coupling_minus_4 ** 2) / (w[0] - E_idx4)
 
-    print(f"angolo G2-G3 (gradi): {angolo_def_g2g3:.2f}")
-    print(f"E_psi_minus esatta: {E_psi_minus_g2g3:.4f}")
-    print(f"E_psi_plus esatta: {E_psi_plus_g2g3:.4f}")
+    # ================== CORREZIONE STATO PLUS (w[1]) ==================
+    # Autovettore: vec[:, 1].
+    # Il coefficiente di idx2 è vec[1,1].
 
-    # 2. Applicazione PT2 con lo stato originale 8
-    idx_pt2_g2g3 = np.where(trash == 8)[0][0]
-    E_distante_g2g3 = singlet_gerade[idx_pt2_g2g3, idx_pt2_g2g3]
+    coupling_plus_3 = vec[1, 1] * V_2_idx3
+    coupling_plus_4 = vec[1, 1] * V_2_idx4
 
-    # vec_g2g3[:, 0] è v_minus, vec_g2g3[:, 1] è v_plus
-    V_eff_minus_g2g3 = vec_g2g3[0, 0] * singlet_gerade[1, idx_pt2_g2g3] + vec_g2g3[1, 0] * singlet_gerade[
-        3, idx_pt2_g2g3]
-    V_eff_plus_g2g3 = vec_g2g3[0, 1] * singlet_gerade[1, idx_pt2_g2g3] + vec_g2g3[1, 1] * singlet_gerade[
-        3, idx_pt2_g2g3]
+    E_s_gerade_plus = w[1] + (coupling_plus_3 ** 2) / (w[1] - E_idx3) + (coupling_plus_4 ** 2) / (w[1] - E_idx4)
 
-    pt2_minus_g2g3 = (V_eff_minus_g2g3 ** 2) / (E_psi_minus_g2g3 - E_distante_g2g3)
-    pt2_plus_g2g3 = (V_eff_plus_g2g3 ** 2) / (E_psi_plus_g2g3 - E_distante_g2g3)
-
-    E_psi_minus_corretta_g2g3 = E_psi_minus_g2g3 + pt2_minus_g2g3
-    E_psi_plus_corretta_g2g3 = E_psi_plus_g2g3 + pt2_plus_g2g3
-
-    print(f"--- After PT2 (Stato 8) ---")
-    print(f"Correzione PT2 su minus: {pt2_minus_g2g3:.6f}")
-    print(f"E_psi_minus_corretta: {E_psi_minus_corretta_g2g3:.4f}")
-    print(f"Correzione PT2 su plus: {pt2_plus_g2g3:.6f}")
-    print(f"E_psi_plus_corretta: {E_psi_plus_corretta_g2g3:.4f}")
-    s_gerade = E_psi_minus_corretta_g2g3
-    # =============================================================================================
 
     # ==========================INIZIO UNGERADE DI SINGOLETTO======================================
     H_matrix_u = costruisci_hamiltoniana_ungerade(**parametri)
@@ -309,42 +284,40 @@ if __name__ == "__main__":
     print(f"=================U1-U4==================")
     idx1 = np.where(trash == 0)[0][0]
     idx2 = np.where(trash == 3)[0][0]    # 1. Costruzione e diagonalizzazione del blocco 2x2 (Indici 0 e 2)
-    mini_H_u = np.array([
+    mini_H_u1u4 = np.array([
         [singlet_ungerade[idx1, idx1], singlet_ungerade[idx1, idx2]],
         [singlet_ungerade[idx2, idx1], singlet_ungerade[idx2, idx2]]
     ])
 
-    w_u, vec_u = np.linalg.eigh(mini_H_u)
-    E_psi_minus_u = w_u[0]
-    E_psi_plus_u = w_u[1]
+    w1, v1 = np.linalg.eigh(mini_H_u1u4)
+    idx3=np.where(trash == 7)[0][0]
+    idx4 = np.where(trash == 6)[0][0]
 
-    deltae_u = singlet_ungerade[idx1, idx1] - singlet_ungerade[idx2, idx2]
-    argomento_u = (2 * singlet_ungerade[idx1, idx2]) / deltae_u if deltae_u != 0 else 0
-    angolo_def_u = math.degrees(np.arctan(argomento_u) / 2)
+    mini_H_u7_u6 =np.array([singlet_ungerade[idx3, idx3], singlet_ungerade[idx3, idx4]],
+        [singlet_ungerade[idx3, idx4], singlet_ungerade[idx4, idx4]])
+    w2, v2 = np.linalg.eigh(mini_H_u7_u6)
+    v_tot = block_diag(v1,v2)
+    w_tot = np.vstack((w1, w2))
+    mini_H_vcoup = np.zeros((4,4))
+    mini_H_vcoup[0,2] = singlet_ungerade[idx1,idx3]
+    mini_H_vcoup[2,0] = mini_H_vcoup[0,2]
+    mini_H_vcoup[1,2] = singlet_ungerade[idx2,idx4]
+    mini_H_vcoup[2,1] = mini_H_vcoup[1,2]
 
-    print(f"angolo U1-U4 (gradi): {angolo_def_u:.2f}")
-    print(f"E_psi_minus esatta: {E_psi_minus_u:.4f}")
-    print(f"E_psi_plus esatta: {E_psi_plus_u:.4f}")
+    v_coup = mod.rotate_matrix(mini_H_vcoup,w_tot,1,4)
+    energy_s_ungerade_minus = w_tot[0] + (v_coup[0,2]**2/(w_tot[0]-w_tot[2])) + (v_coup[0,3]**2/(w_tot[0]-w_tot[3]))
+    energy_s_ungerade_plus = w_tot[1] + (v_coup[1,2]**2/(w_tot[1]-w_tot[2])) + (v_coup[1,3]**2/(w_tot[1]-w_tot[3]))
 
-    # 2. Applicazione PT2 con lo stato originale 5
-    idx_pt2_u = np.where(trash == 5)[0][0]
-    E_distante_u = singlet_ungerade[idx_pt2_u, idx_pt2_u]
+    idx1 = np.where(trash == 1)[0][0]
+    idx2 = np.where(trash == 2)[0][0]
+    mini_H_u2u3 = np.array([
+        [singlet_ungerade[idx1, idx1], singlet_ungerade[idx1, idx2]],
+        [singlet_ungerade[idx2, idx1], singlet_ungerade[idx2, idx2]]
+    ])
+    w1, v1 = np.linalg.eigh(mini_H_u2u3)
+    energy_s3_ungerde = w1[0]
+    energy_s4_ungerde = w1[1]
 
-    V_eff_minus_u = vec_u[0, 0] * singlet_ungerade[0, idx_pt2_u] + vec_u[1, 0] * singlet_ungerade[2, idx_pt2_u]
-    V_eff_plus_u = vec_u[0, 1] * singlet_ungerade[0, idx_pt2_u] + vec_u[1, 1] * singlet_ungerade[2, idx_pt2_u]
-
-    pt2_minus_u = (V_eff_minus_u ** 2) / (E_psi_minus_u - E_distante_u)
-    pt2_plus_u = (V_eff_plus_u ** 2) / (E_psi_plus_u - E_distante_u)
-
-    E_psi_minus_corretta_u = E_psi_minus_u + pt2_minus_u
-    E_psi_plus_corretta_u = E_psi_plus_u + pt2_plus_u
-
-    print(f"--- After PT2 (Stato 5) ---")
-    print(f"Correzione PT2 su minus: {pt2_minus_u:.6f}")
-    print(f"E_psi_minus_corretta: {E_psi_minus_corretta_u:.4f}")
-    print(f"Correzione PT2 su plus: {pt2_plus_u:.6f}")
-    print(f"E_psi_plus_corretta: {E_psi_plus_corretta_u:.4f}")
-    s_ungerade = E_psi_minus_corretta_u
     # =============================================================================================
 
     #========================TRIPLETTI GERADE==================================================
@@ -352,17 +325,6 @@ if __name__ == "__main__":
     triplet_gerade, trash = ordina_matrice_per_diagonale(H_matrix)
     print(f"Diagonale: {np.diag(triplet_gerade)}")
     print(f"Indici ordinati: {trash}")
-    #======================TG1 - TG2==========================================================
-    idx1 = np.where(trash == 0)[0][0]
-    idx2 = np.where(trash == 1)[0][0]
-    mini_H_t1t2 = np.zeros((2,2))
-    mini_H_t1t2[0,0] = triplet_gerade[idx1, idx1]
-    mini_H_t1t2[1,1] = triplet_gerade[idx2, idx2]
-    mini_H_t1t2[0,1] = triplet_gerade[idx1, idx2]
-    mini_H_t1t2[1,0] = triplet_gerade[idx2, idx1]
-    w_t1t2, vec_t1t2 = np.linalg.eigh(mini_H_t1t2)
-    E_GS_trip = w_t1t2[0]
-
 
     #======================TG 4 - TG 5==========================================================
     idx1 = np.where(trash == 4)[0][0]
@@ -380,32 +342,28 @@ if __name__ == "__main__":
     mini_H[0,1] = triplet_gerade[idx1, idx2]
     mini_H[1,0] = triplet_gerade[idx2, idx1]
     w, vec = np.linalg.eigh(mini_H)
-    E_psi_minus = w[0]
-    E_psi_plus = w[1]
-    v_minus = vec[:, 0]
-    v_plus = vec[:, 1]
 
-    print(f"E_psi_minus: {E_psi_minus}")
-    print(f"E_psi_plus: {E_psi_plus}")
+    # ... [tutto uguale fino a w, vec = np.linalg.eigh(mini_H)] ...
 
     idx = np.where(trash == 2)[0][0]
-    E_distante = triplet_gerade[idx, idx]
 
-    V_eff_minus = v_minus[0] * triplet_gerade[idx1, idx] + v_minus[1] * triplet_gerade[idx2, idx]
-    V_eff_plus = v_plus[0] * triplet_gerade[idx1, idx] + v_plus[1] * triplet_gerade[idx2, idx]
+    # 1. Energia dello stato perturbante (Ordine 0)
+    E_idx = triplet_gerade[idx, idx]
 
-    # 2. Applichiamo la formula di perturbazione del secondo ordine: |V|^2 / (E - E0)
-    pt2_minus = (V_eff_minus ** 2) / (E_psi_minus - E_distante)
-    pt2_plus = (V_eff_plus ** 2) / (E_psi_plus - E_distante)
+    # 2. Elementi di accoppiamento "nudi" (V_13 e V_23) tra la base originale e lo stato idx
+    V_1_idx = triplet_gerade[idx1, idx]
+    V_2_idx = triplet_gerade[idx2, idx]
 
-    # 3. Applichiamo le correzioni
-    E_psi_minus_corretta = E_psi_minus + pt2_minus
-    E_psi_plus_corretta = E_psi_plus + pt2_plus
-    print(f"After PT2")
-    print(f"E_psi_minus: {E_psi_minus}")
-    print(f"E_psi_plus: {E_psi_plus}")
-    print(f"E_psi_minus_corretta: {E_psi_minus_corretta}")
-    print(f"E_psi_plus_corretta: {E_psi_plus_corretta}")
-    t_ungerade1 = E_psi_minus_corretta
-    t_ungerade2 = E_psi_plus_corretta
-    print(f"GS Singlet, G_triplet, S_gerade, S_ungerade, T_ungerade1: {GS_singoletto}, {E_GS_trip}, {s_gerade}, {s_ungerade}, {t_ungerade1}, {t_ungerade2}")
+    # --- CALCOLO PER LO STATO MINUS (w[0]) ---
+    # Autovettore associato: vec[:, 0]
+    # L'accoppiamento totale è la somma lineare pesata dai coefficienti dell'autovettore
+    coupling_minus = (vec[0, 0] * V_1_idx) + (vec[1, 0] * V_2_idx)
+
+    # Teoria delle perturbazioni al 2° ordine: E_new = E_old + |V|^2 / (E_old - E_idx)
+    E_t_gerade_minus = w[0] + (coupling_minus ** 2) / (w[0] - E_idx)
+
+    # --- CALCOLO PER LO STATO PLUS (w[1]) ---
+    # Autovettore associato: vec[:, 1]
+    coupling_plus = (vec[0, 1] * V_1_idx) + (vec[1, 1] * V_2_idx)
+
+    E_t_gerade_plus = w[1] + (coupling_plus ** 2) / (w[1] - E_idx)
